@@ -7,7 +7,7 @@ from langchain.messages import HumanMessage
 import base64
 from app.core.agent import agent
 from app.controllers.infer_with_image_controller import infer_with_image_controller
-from app.controllers.infer_with_video_controller import infer_with_video_controller
+from app.controllers.infer_with_video_controller_tracker import infer_with_video_controller_tracker
 from typing import Optional, List, Literal
 import tempfile
 from app.models.DetectResponse import DetectResponse
@@ -58,7 +58,7 @@ async def infer_car_with_video(
     
     try:
         result: DetectResponse = await run_in_threadpool(
-            infer_with_video_controller,
+            infer_with_video_controller_tracker,
             temp_path,
             frame_stride,
             conf,
