@@ -1,17 +1,27 @@
 import mimetypes
 import os
-from fastapi import APIRouter, File, HTTPException, UploadFile, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
 from fastapi.responses import JSONResponse
-from starlette import status
-from langchain.messages import HumanMessage
-import base64
-from app.core.agent import agent
+from requests import Session
 from app.controllers.infer_with_image_controller import infer_with_image_controller
 from app.controllers.infer_with_video_controller_tracker import infer_with_video_controller_tracker
-from typing import Optional, List, Literal
+from typing import Annotated, Optional, List, Literal
 import tempfile
+from app.models.db.models import Cars
 from app.models.DetectResponse import DetectResponse
 from starlette.concurrency import run_in_threadpool
+from app.utils.metadata_processing import process_image_metadata_from_bytes, process_video_metadata_from_path
+from app.core.db import SessionLocal
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+db_dependency = Annotated[Session, Depends(get_db)]
 
 router = APIRouter(
     prefix="/inference",
@@ -19,12 +29,44 @@ router = APIRouter(
 )
 
 @router.post("/car-with-image")
-async def infer_car_with_image(file: UploadFile = File(...)):
+async def infer_car_with_image(
+    db: db_dependency,
+    file: UploadFile = File(...),
+    lat: Annotated[Optional[float], Form()] = None,
+    lon: Annotated[Optional[float], Form()] = None,
+    source_video_id: Annotated[Optional[str], Form()] = None,
+):
     if not (file.content_type or "").startswith("image/"):
         raise HTTPException(400, "Debe ser una imagen")
-    result = await infer_with_image_controller(file)
-    
-    return {"message": result}
+
+    data = await file.read()
+
+    # tu inferencia (si acepta bytes)
+    result = await infer_with_image_controller(data)
+
+    # metadatos desde el crop Y/O heredados del video
+    meta = process_image_metadata_from_bytes(data, filename=file.filename, content_type=file.content_type)
+
+    # Si el front envió lat/lon del video, úsalos como fallback o como “source of truth”
+    if lat is not None and lon is not None:
+        meta = {**meta, "video_lat": lat, "video_lon": lon}
+
+    if source_video_id:
+        meta["source_video_id"] = source_video_id
+
+    car_model = Cars(
+        brand=result.brand,
+        model_name=result.model_name,
+        year=result.year,
+        lat=lat if lat else meta.get("lat"),
+        lng=lon if lon else meta.get("lon")
+    )
+
+    db.add(car_model)
+    db.commit()
+
+    return {"message": result, "metadata": meta}
+
 
 @router.post("/car-with-video")
 async def infer_car_with_video(
@@ -68,7 +110,10 @@ async def infer_car_with_video(
             thumb_width,
             vehicle_types
         )
-        return JSONResponse(result.model_dump())
+        metadata_result = process_video_metadata_from_path(temp_path)
+        payload = result.model_dump()
+        payload["metadata"] = metadata_result
+        return JSONResponse(payload)
 
     finally:
         try:

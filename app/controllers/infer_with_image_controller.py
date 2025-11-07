@@ -4,8 +4,7 @@ import base64
 from langchain.messages import HumanMessage, TextContentBlock, ImageContentBlock
 
 
-async def infer_with_image_controller(file: File):
-    data = await file.read()
+async def infer_with_image_controller(data: bytes):
     b64_bytes = base64.b64encode(data)
     b64_str = b64_bytes.decode("utf-8")
     content_blocks = [

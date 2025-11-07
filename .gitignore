@@ -1,3 +1,5 @@
 .env
 __pycache__
 yolov8m.pt
+app.db
+teoria.md
